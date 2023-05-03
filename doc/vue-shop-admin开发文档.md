@@ -497,35 +497,173 @@ export default defineComponent({
 但是我们会发现是没有对应的样式的，引入样式有两种方式：
 
 - 全局引用样式（像之前做的那样）；
+
 - 局部引用样式；
 
-  1.首先你需要安装`unplugin-vue-components` 和 `unplugin-auto-import`这两款插件
+  1.首先你需要安装`unplugin-vue-components` 和 `unplugin-element-plus`这两款插件
 
 ```shell
-npm install -D unplugin-vue-components unplugin-auto-import
+npm install -D unplugin-vue-components unplugin-element-plus
 ```
 
 2.配置 vue.config.js
 
 ```js
-const AutoImport = require('unplugin-auto-import/webpack')
-const Components = require('unplugin-vue-components/webpack')
-const { ElementPlusResolver } = require('unplugin-vue-components/resolvers')
+const { defineConfig } = require('@vue/cli-service')
+module.exports = defineConfig({
+  transpileDependencies: true,
+  configureWebpack: {
+    plugins: [
+      require('unplugin-element-plus/webpack')({
+        // options
+      }),
+      require('unplugin-vue-components/webpack')({
+        /* options */
+      })
+    ]
+  }
+})
 
-module.exports = {
-  // ...
-  plugins: [
-    AutoImport({
-      resolvers: [ElementPlusResolver()]
-    }),
-    Components({
-      resolvers: [ElementPlusResolver()]
-    })
-  ]
-}
 ```
 
-![image-20230408104645031](./assets/image-20230408104645031.png)
+![image-20230503213600841](./assets/image-20230503213600841.png)
+
+3. 按需注册组件
+
+`main.ts`
+
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import router from './router'
+import store from './store'
+import { ElButton, ElForm, ElFormItem, ElInput, ElRadio } from 'element-plus'
+const components = [ElButton, ElForm, ElFormItem, ElInput, ElRadio]
+
+const app = createApp(App)
+
+for (const component of components) {
+  app.component(component.name, component)
+}
+
+app.use(store)
+app.use(router)
+app.mount('#app')
+
+```
+
+4. 抽离业务
+
+`src/global/index.ts`
+
+```javascript
+import { App } from 'vue'
+import { ElButton, ElForm, ElFormItem, ElInput, ElRadio } from 'element-plus'
+const components = [ElButton, ElForm, ElFormItem, ElInput, ElRadio]
+
+export function registerApp(app: App) {
+  for (const component of components) {
+    app.component(component.name, component)
+  }
+}
+
+```
+
+`src/main.ts`
+
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import router from './router'
+import store from './store'
+import { registerApp } from './global'
+
+const app = createApp(App)
+
+registerApp(app)
+app.use(store)
+app.use(router)
+app.mount('#app')
+
+```
+
+5. 业务再进一步抽离
+
+`src/global/register-element.ts`
+
+```javascript
+import { App } from 'vue'
+import { ElButton, ElForm, ElFormItem, ElInput, ElRadio } from 'element-plus'
+const components = [ElButton, ElForm, ElFormItem, ElInput, ElRadio]
+export default function (app: App) {
+  for (const component of components) {
+    app.component(component.name, component)
+  }
+}
+
+```
+
+`src/global/index.ts`
+
+```javascript
+import { App } from 'vue'
+import registerElement from './register-element'
+export function registerApp(app: App) {
+  registerElement(app)
+}
+
+```
+
+`src/main.ts`
+
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import router from './router'
+import store from './store'
+import { registerApp } from './global'
+
+const app = createApp(App)
+
+registerApp(app)
+app.use(store)
+app.use(router)
+app.mount('#app')
+```
+
+6. 使用`app.use注册按需引入组件`
+
+`src/global/index.ts`
+
+```javascript
+import { App } from 'vue'
+import registerElement from './register-element'
+export function globalRegister(app: App) {
+  app.use(registerElement)
+}
+
+```
+
+`src/main.ts`
+
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import router from './router'
+import store from './store'
+import { globalRegister } from './global'
+
+const app = createApp(App)
+
+// registerApp(app)
+app.use(globalRegister)
+app.use(store)
+app.use(router)
+app.mount('#app')
+
+```
+
+
 
 ### 5.5 axios 集成
 
@@ -615,4 +753,3 @@ class HYRequest {
 export default HYRequest
 ```
 
-####
