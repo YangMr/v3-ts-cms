@@ -671,6 +671,8 @@ app.mount('#app')
 
 ![image-20230408113444872](./assets/image-20230408113444872.png)
 
+#### 5.5.2 封装axios
+
 安装 axios：
 
 ```shell
@@ -679,77 +681,267 @@ npm install axios
 
 封装 axios：
 
-```ts
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { Result } from './types'
-import { useUserStore } from '/@/store/modules/user'
+`src/service/request/config.ts`
+
+```javascript
+const BASE_URL = process.env.VUE_APP_BASE_API
+const TIMEOUT = 5000
+
+export { BASE_URL, TIMEOUT }
+```
+
+`src/rservice/request/type.ts`
+
+```javascript
+import type {
+  AxiosRequestConfig,
+  AxiosResponse,
+  InternalAxiosRequestConfig
+} from 'axios'
+
+export interface HYRequestInterceptors {
+  // requestInterceptor?: (config: AxiosRequestConfig) => AxiosRequestConfig
+  // requestInterceptorCatch?: (error: any) => any
+  // responseInterceptor?: (res: AxiosResponse) => AxiosResponse
+  // responseInterceptorCatch?: (error: any) => any
+  requestInterceptor?: (
+    config: InternalAxiosRequestConfig<any>
+  ) =>
+    | InternalAxiosRequestConfig<any>
+    | Promise<InternalAxiosRequestConfig<any>>
+  requestInterceptorCatch?: (error: any) => any
+  responseInterceptor?: (
+    res: AxiosResponse<any>
+  ) => AxiosResponse<any> | Promise<AxiosResponse<any>>
+  responseInterceptorCatch?: (error: any) => any
+}
+
+export interface HYRequestConfig extends AxiosRequestConfig {
+  interceptors?: HYRequestInterceptors
+  showLoading?: boolean
+}
+
+export interface DataType<T> {
+  data?: T
+  returnCode?: string
+  success?: boolean
+}
+
+```
+
+`src/rservice/request/index.ts`
+
+```javascript
+import axios from 'axios'
+import type { AxiosInstance } from 'axios'
+import type { HYRequestConfig, HYRequestInterceptors } from './type'
+import { ElLoading } from 'element-plus'
+import type { LoadingInstance } from 'element-plus/lib/components/loading/src/loading'
+const loading = {
+  loadingInstance: null as LoadingInstance | null,
+  open() {
+    if (this.loadingInstance === null) {
+      this.loadingInstance = ElLoading.service({
+        text: '正在加载中',
+        background: 'rgba(0,0,0,0.5)'
+      })
+    }
+  },
+  close() {
+    if (this.loadingInstance !== null) {
+      this.loadingInstance.close()
+    }
+    this.loadingInstance = null
+  }
+}
 
 class HYRequest {
-  private instance: AxiosInstance
+  instance: AxiosInstance
+  interceptors?: HYRequestInterceptors
+  showLoading: boolean
 
-  private readonly options: AxiosRequestConfig
+  constructor(config: HYRequestConfig) {
+    this.instance = axios.create(config)
+    this.interceptors = config.interceptors
 
-  constructor(options: AxiosRequestConfig) {
-    this.options = options
-    this.instance = axios.create(options)
+    this.showLoading = config.showLoading ?? true
+
+    this.instance.interceptors.request.use(
+      this.interceptors?.requestInterceptor,
+      this.interceptors?.requestInterceptorCatch
+    )
+
+    this.instance.interceptors.response.use(
+      this.interceptors?.responseInterceptor,
+      this.interceptors?.responseInterceptorCatch
+    )
 
     this.instance.interceptors.request.use(
       (config) => {
-        const token = useUserStore().getToken
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
+        if (this.showLoading) {
+          loading.open()
         }
+
+        config.headers.c = '789'
+        console.log('全局请求成功拦截器')
         return config
       },
       (err) => {
+        loading.close()
+        console.log('全局请求失败拦截器')
         return err
       }
     )
 
     this.instance.interceptors.response.use(
       (res) => {
-        // 拦截响应的数据
-        if (res.data.code === 0) {
-          return res.data.data
-        }
-        return res.data
+        loading.close()
+        console.log('全局响应成功拦截器')
+        return res
       },
       (err) => {
+        loading.close()
+        console.log('全局响应失败拦截器')
         return err
       }
     )
   }
 
-  request<T = any>(config: AxiosRequestConfig): Promise<T> {
+  request<T>(config: HYRequestConfig): Promise<T> {
     return new Promise((resolve, reject) => {
+      if (config.interceptors?.requestInterceptor) {
+        this.instance.interceptors.request.use(
+          config.interceptors?.requestInterceptor,
+          config.interceptors?.requestInterceptorCatch
+        )
+      }
+
+      if (config.showLoading === false) {
+        this.showLoading = config.showLoading
+      }
+
       this.instance
-        .request<any, AxiosResponse<Result<T>>>(config)
+        .request<any, T>(config)
         .then((res) => {
-          resolve(res as unknown as Promise<T>)
+          if (config.interceptors?.responseInterceptor) {
+            this.instance.interceptors.response.use(
+              config.interceptors?.responseInterceptor,
+              config.interceptors?.responseInterceptorCatch
+            )
+          }
+
+          this.showLoading = true
+
+          resolve(res)
+          console.log('res=>', res)
         })
         .catch((err) => {
+          this.showLoading = true
           reject(err)
+          return err
         })
     })
   }
 
-  get<T = any>(config: AxiosRequestConfig): Promise<T> {
-    return this.request({ ...config, method: 'GET' })
+  get<T>(config: HYRequestConfig): Promise<T> {
+    return this.request<T>({ ...config, method: 'GET' })
   }
-
-  post<T = any>(config: AxiosRequestConfig): Promise<T> {
-    return this.request({ ...config, method: 'POST' })
+  post<T>(config: HYRequestConfig): Promise<T> {
+    return this.request<T>({ ...config, method: 'POST' })
   }
-
-  patch<T = any>(config: AxiosRequestConfig): Promise<T> {
-    return this.request({ ...config, method: 'PATCH' })
+  delete<T>(config: HYRequestConfig): Promise<T> {
+    return this.request<T>({ ...config, method: 'DELETE' })
   }
-
-  delete<T = any>(config: AxiosRequestConfig): Promise<T> {
-    return this.request({ ...config, method: 'DELETE' })
+  put<T>(config: HYRequestConfig): Promise<T> {
+    return this.request<T>({ ...config, method: 'PUT' })
   }
 }
 
 export default HYRequest
+
+```
+
+`src/rservice/index.ts`
+
+```javascript
+import HYRequest from './request'
+import { BASE_URL, TIMEOUT } from './request/config'
+
+const hyRequest = new HYRequest({
+  baseURL: BASE_URL,
+  timeout: TIMEOUT,
+  interceptors: {
+    requestInterceptor: (config) => {
+      config.headers.b = '456'
+      console.log('请求成功的拦截')
+      return config
+    },
+    requestInterceptorCatch: (error) => {
+      console.log('请求失败的拦截')
+      return error
+    },
+    responseInterceptor: (res) => {
+      console.log('响应成功的拦截')
+      return res
+    },
+    responseInterceptorCatch: (error) => {
+      console.log('响应失败的拦截')
+      return error
+    }
+  }
+})
+
+export default hyRequest
+
+```
+
+`src/main.ts`
+
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import router from './router'
+import store from './store'
+import { globalRegister } from './global'
+import { DataType } from './service/request/type'
+import hyRequest from './service'
+
+hyRequest
+  .request<DataType<any>>({
+    url: '/member/list/search/1/20',
+    method: 'POST',
+    showLoading: false,
+    interceptors: {
+      requestInterceptor: (config) => {
+        config.headers.a = '123'
+        console.log('单个请求成功拦截器')
+        return config
+      },
+      requestInterceptorCatch: (error) => {
+        console.log('单个请求失败拦截器')
+        return error
+      },
+      responseInterceptor: (res) => {
+        console.log('单个响应成功拦截器')
+        return res
+      },
+      responseInterceptorCatch: (error) => {
+        console.log('单个响应失败拦截器')
+        return error
+      }
+    }
+  })
+  .then((res) => {
+    console.log(res)
+  })
+
+const app = createApp(App)
+
+// registerApp(app)
+app.use(globalRegister)
+app.use(store)
+app.use(router)
+app.mount('#app')
+
 ```
 
